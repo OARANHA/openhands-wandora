@@ -1,13 +1,13 @@
 name: Import OpenHands upstream into a review branch
 
+# Manual gate: a fine-grained GitHub PAT with Contents (read/write) and
+# Workflows (read/write) scoped to this repository is required.
+# GITHUB_TOKEN (GitHub App) cannot push upstream .github/workflows files.
 on:
-  push:
-    branches: [main]
-    paths: [".github/workflows/import-openhands-upstream.yml"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: import-openhands-upstream
@@ -19,10 +19,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - name: Checkout bootstrap repository
+      - name: Verify the limited import credential is configured
+        env:
+          IMPORT_TOKEN: ${{ secrets.OPENHANDS_IMPORT_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "${IMPORT_TOKEN}" ]; then
+            echo "::error::Add repository secret OPENHANDS_IMPORT_TOKEN with Contents and Workflows write permissions, then dispatch this workflow manually."
+            exit 1
+          fi
+
+      - name: Checkout bootstrap repository with authorized token
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.OPENHANDS_IMPORT_TOKEN }}
+          persist-credentials: true
 
       - name: Import pinned upstream history to an isolated branch
         env:
@@ -46,11 +58,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Merge unrelated histories. The upstream's complete Git ancestry is
-          # preserved, while the bootstrap workflow remains in the resulting tree.
-          # No changes are pushed to main.
+          # Preserve the complete upstream Git ancestry, including workflows.
+          # Merge the bootstrap history only into this review branch.
           git merge --no-ff --no-edit --allow-unrelated-histories FETCH_HEAD \
-            -m "chore: import OpenHands history at ${UPSTREAM_SHA}"
+            -m "chore: import OpenHands history at ${UPSTREAM_SHA}" > /dev/null
 
           test -f LICENSE
           git push origin "HEAD:refs/heads/${IMPORT_BRANCH}"
